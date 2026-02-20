@@ -67,4 +67,58 @@ impl StellarStream {
 
         stream_id
     }
+
+    pub fn withdraw(env: Env, stream_id: u64, receiver: Address) -> i128 {
+        // 1. Auth: Only the receiver can trigger this withdrawal
+        receiver.require_auth();
+
+        // 2. Fetch the Stream: Retrieve from Persistent storage
+        let mut stream: Stream = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Stream(stream_id))
+            .unwrap_or_else(|| panic!("Stream does not exist"));
+
+        // 3. Security: Ensure the caller is the actual receiver of this stream
+        if receiver != stream.receiver {
+            panic!("Unauthorized: You are not the receiver of this stream");
+        }
+
+        // 4. Time Calculation: Get current ledger time
+        let now = env.ledger().timestamp();
+
+        // 5. Math Logic: Calculate total unlocked amount based on time
+        // We pass the stream details to our math module
+        let total_unlocked =
+            math::calculate_unlocked(stream.amount, stream.start_time, stream.end_time, now);
+
+        // 6. Calculate Withdrawable: (Unlocked so far) - (Already withdrawn)
+        let withdrawable_amount = total_unlocked - stream.withdrawn_amount;
+
+        if withdrawable_amount <= 0 {
+            panic!("No funds available to withdraw at this time");
+        }
+
+        // 7. Token Transfer: Move funds from contract to receiver
+        let token_client = token::Client::new(&env, &stream.token);
+        token_client.transfer(
+            &env.current_contract_address(),
+            &receiver,
+            &withdrawable_amount,
+        );
+
+        // 8. Update State: Increment the withdrawn_amount and save back to storage
+        stream.withdrawn_amount += withdrawable_amount;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Stream(stream_id), &stream);
+
+        // 9. Emit Event
+        env.events().publish(
+            (symbol_short!("withdraw"), receiver),
+            (stream_id, withdrawable_amount),
+        );
+
+        withdrawable_amount
+    }
 }
