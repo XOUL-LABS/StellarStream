@@ -15,6 +15,36 @@ pub struct StellarStream;
 
 #[contractimpl]
 impl StellarStream {
+    pub fn initialize(env: Env, admin: Address) {
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::IsPaused, &false);
+    }
+
+    pub fn set_pause(env: Env, admin: Address, paused: bool) {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Admin not set");
+        if admin != stored_admin {
+            panic!("Unauthorized: Only admin can pause");
+        }
+        env.storage().instance().set(&DataKey::IsPaused, &paused);
+    }
+
+    fn check_not_paused(env: &Env) {
+        let is_paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::IsPaused)
+            .unwrap_or(false);
+        if is_paused {
+            panic!("Contract is paused");
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn create_stream(
         env: Env,
@@ -26,6 +56,7 @@ impl StellarStream {
         cliff_time: u64,
         end_time: u64,
     ) -> u64 {
+        Self::check_not_paused(&env);
         sender.require_auth();
 
         if end_time <= start_time {
@@ -132,6 +163,7 @@ impl StellarStream {
     }
 
     pub fn withdraw(env: Env, stream_id: u64, receiver: Address) -> i128 {
+        Self::check_not_paused(&env);
         receiver.require_auth();
 
         let stream_key = DataKey::Stream(stream_id);
@@ -182,6 +214,7 @@ impl StellarStream {
     }
 
     pub fn cancel_stream(env: Env, stream_id: u64) {
+        Self::check_not_paused(&env);
         let stream_key = DataKey::Stream(stream_id);
         let stream: Stream = env
             .storage()

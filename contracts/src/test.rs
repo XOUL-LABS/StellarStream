@@ -1,10 +1,10 @@
 #![cfg(test)]
 
 use super::*;
-// Note: testutils trait is needed for Address::generate
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{token, Address, Env};
 
+#[allow(dead_code)]
 struct TestContext {
     env: Env,
     contract_id: Address,
@@ -24,7 +24,7 @@ fn setup_test() -> TestContext {
 
     let token_admin = Address::generate(&env);
 
-    // v22 Change: register_stellar_asset_contract -> register_stellar_asset_contract
+    #[allow(deprecated)]
     let token_id = env.register_stellar_asset_contract(token_admin.clone());
     let token = token::StellarAssetClient::new(&env, &token_id);
 
@@ -169,6 +169,52 @@ fn test_batch_stream_creation() {
 
     let token_client = token::Client::new(&ctx.env, &ctx.token_id);
     assert_eq!(token_client.balance(&ctx.contract_id), 3000);
+#[should_panic(expected = "Contract is paused")]
+fn test_pause_blocks_create_stream() {
+    let ctx = setup_test();
+    let admin = Address::generate(&ctx.env);
+    let sender = Address::generate(&ctx.env);
+    let receiver = Address::generate(&ctx.env);
+
+    ctx.client.initialize(&admin);
+    ctx.client.set_pause(&admin, &true);
+
+    ctx.token.mint(&sender, &1000);
+    ctx.client
+        .create_stream(&sender, &receiver, &ctx.token_id, &1000, &0, &1000);
+}
+
+#[test]
+#[should_panic(expected = "Contract is paused")]
+fn test_pause_blocks_withdraw() {
+    let ctx = setup_test();
+    let admin = Address::generate(&ctx.env);
+    let sender = Address::generate(&ctx.env);
+    let receiver = Address::generate(&ctx.env);
+
+    ctx.client.initialize(&admin);
+    ctx.token.mint(&sender, &1000);
+    let stream_id = ctx
+        .client
+        .create_stream(&sender, &receiver, &ctx.token_id, &1000, &0, &1000);
+
+    ctx.client.set_pause(&admin, &true);
+
+    ctx.env.ledger().set(soroban_sdk::testutils::LedgerInfo {
+        timestamp: 500,
+        protocol_version: 22,
+        sequence_number: 1,
+        network_id: [0u8; 32],
+        base_reserve: 0,
+        min_temp_entry_ttl: 0,
+        min_persistent_entry_ttl: 0,
+        max_entry_ttl: 1000000,
+    });
+
+    ctx.client.withdraw(&stream_id, &receiver);
+}
+
+#[test]
 #[should_panic(expected = "No funds available to withdraw at this time")]
 fn test_cliff_blocks_withdrawal() {
     let ctx = setup_test();
@@ -216,6 +262,26 @@ fn test_cliff_unlocks_at_cliff_time() {
         max_entry_ttl: 1000000,
     });
 
+    ctx.client.withdraw(&stream_id, &receiver);
+}
+
+#[test]
+fn test_unpause_allows_operations() {
+    let ctx = setup_test();
+    let admin = Address::generate(&ctx.env);
+    let sender = Address::generate(&ctx.env);
+    let receiver = Address::generate(&ctx.env);
+
+    ctx.client.initialize(&admin);
+    ctx.client.set_pause(&admin, &true);
+    ctx.client.set_pause(&admin, &false);
+
+    ctx.token.mint(&sender, &1000);
+    let stream_id = ctx
+        .client
+        .create_stream(&sender, &receiver, &ctx.token_id, &1000, &0, &1000);
+
+    assert_eq!(stream_id, 1);
     let withdrawn = ctx.client.withdraw(&stream_id, &receiver);
     assert_eq!(withdrawn, 500);
 }
