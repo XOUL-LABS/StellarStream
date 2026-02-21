@@ -138,9 +138,9 @@ fn test_protocol_fee() {
     ctx.client.initialize_fee(&admin, &100, &treasury);
 
     ctx.token.mint(&sender, &1000);
-  
-
 }
+
+#[test]
 fn test_transfer_receiver() {
     let ctx = setup_test();
     let sender = Address::generate(&ctx.env);
